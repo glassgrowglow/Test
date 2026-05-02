@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Grow Glow Journal 진단 도구</title>
+<style>
+  body { font-family: -apple-system, sans-serif; padding: 16px; max-width: 800px; margin: 0 auto; line-height: 1.5; color: #333; }
+  h1 { font-size: 18px; }
+  h2 { font-size: 15px; margin-top: 22px; padding-bottom: 4px; border-bottom: 1px solid #ddd; }
+  button { padding: 10px 16px; font-size: 14px; margin: 4px 4px 4px 0; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
+  button.primary { background: #f57c00; color: white; border-color: #f57c00; }
+  button.danger { background: #d93025; color: white; border-color: #d93025; }
+  pre { background: #f5f5f5; padding: 10px; border-radius: 6px; font-size: 11px; max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: #0a8a3a; font-weight: 600; }
+  .ng { color: #d93025; font-weight: 600; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; background: #eee; margin-right: 4px; }
+  input[type="file"] { margin: 8px 0; }
+  .step { background: #fff8e1; border-left: 4px solid #f57c00; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>🔍 Grow Glow Journal 진단 도구</h1>
+<p style="color:#666;font-size:13px;">이 페이지를 사용해서 실제 어떤 문제가 발생하는지 확인할 수 있어요.</p>
+
+<div class="step">
+  <b>STEP 1.</b> 현재 브라우저(또는 모바일)의 localStorage에 <code>ggg_</code> 데이터가 있는지 확인
+</div>
+<button onclick="showCurrentLS()">현재 localStorage 상태 보기</button>
+<button class="danger" onclick="clearAll()">모두 삭제 (초기화)</button>
+<pre id="ls-output">버튼을 눌러보세요</pre>
+
+<div class="step">
+  <b>STEP 2.</b> 백업 파일 import 시뮬레이션
+</div>
+<input type="file" id="file-input" accept=".json,application/json" onchange="doImport(event)">
+<button onclick="document.getElementById('file-input').click()">백업 파일 선택해서 import 하기</button>
+<pre id="import-output">파일을 선택하면 결과가 여기 표시돼요</pre>
+
+<div class="step">
+  <b>STEP 3.</b> import 후 데이터를 앱이 어떻게 읽는지 확인 (get 함수 시뮬)
+</div>
+<button onclick="testGet()">데이터 읽기 테스트</button>
+<pre id="get-output">버튼을 눌러보세요</pre>
+
+<script>
+// 앱과 동일한 get/set 함수
+const get = k => { try { return JSON.parse(localStorage.getItem('ggg_' + k)); } catch { return null; } };
+
+function showCurrentLS() {
+  const out = document.getElementById('ls-output');
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('ggg_')) keys.push(k);
+  }
+  if (keys.length === 0) {
+    out.innerHTML = '<span class="ng">⚠️ ggg_ 키가 없어요.</span> 앱을 한 번도 안 썼거나, 시크릿 모드이거나, 다른 도메인이에요.\n\n현재 페이지 URL: ' + location.href;
+    return;
+  }
+  let txt = '<span class="ok">✅ 총 ' + keys.length + '개 키 발견</span>\n\n';
+  keys.sort().forEach(k => {
+    const raw = localStorage.getItem(k);
+    let parseInfo = '';
+    try {
+      const p = JSON.parse(raw);
+      parseInfo = ' [' + (Array.isArray(p) ? 'array(' + p.length + ')' : typeof p) + ']';
+    } catch {
+      parseInfo = ' <span class="ng">[parse 실패!]</span>';
+    }
+    txt += k + ' (' + raw.length + '자)' + parseInfo + '\n';
+    txt += '  처음 80자: ' + escapeHtml(raw.substring(0, 80)) + '\n\n';
+  });
+  out.innerHTML = txt;
+}
+
+function clearAll() {
+  if (!confirm('정말로 모든 ggg_ 데이터를 삭제할까요?')) return;
+  const toRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('ggg_')) toRemove.push(k);
+  }
+  toRemove.forEach(k => localStorage.removeItem(k));
+  alert(toRemove.length + '개 키 삭제됨');
+  showCurrentLS();
+}
+
+function doImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const out = document.getElementById('import-output');
+  out.innerHTML = '파일 읽는 중...';
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let log = '';
+    log += '파일명: ' + file.name + '\n';
+    log += '크기: ' + file.size + ' bytes\n\n';
+
+    let parsed;
+    try {
+      parsed = JSON.parse(e.target.result);
+    } catch (err) {
+      out.innerHTML = '<span class="ng">❌ JSON 파싱 실패: ' + escapeHtml(err.message) + '</span>';
+      return;
+    }
+    log += '✅ JSON 파싱 성공\n';
+    log += 'app: ' + parsed.app + '\n';
+    log += 'version: ' + parsed.version + '\n';
+    log += '데이터 키 개수: ' + Object.keys(parsed.data || {}).length + '\n\n';
+
+    // 기존 ggg_ 삭제
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('ggg_')) toRemove.push(k);
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+    log += '기존 ggg_ 키 ' + toRemove.length + '개 삭제\n\n';
+
+    // 강화된 import 로직
+    let okCount = 0, failCount = 0;
+    const failures = [];
+    Object.entries(parsed.data || {}).forEach(([key, value]) => {
+      if (typeof key !== 'string' || !key.startsWith('ggg_')) return;
+      try {
+        let stored;
+        if (value === null || value === undefined) {
+          return;
+        } else if (typeof value === 'string') {
+          let isValidJson = false;
+          try { JSON.parse(value); isValidJson = true; } catch {}
+          stored = isValidJson ? value : JSON.stringify(value);
+        } else {
+          stored = JSON.stringify(value);
+        }
+        localStorage.setItem(key, stored);
+        okCount++;
+      } catch (e) {
+        failCount++;
+        failures.push(key + ': ' + e.message);
+      }
+    });
+    log += '✅ setItem 성공: ' + okCount + '개\n';
+    if (failCount) {
+      log += '<span class="ng">❌ 실패: ' + failCount + '개</span>\n';
+      failures.forEach(f => log += '  - ' + escapeHtml(f) + '\n');
+    }
+
+    // 저장 직후 검증
+    log += '\n=== 저장 직후 localStorage 확인 ===\n';
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('ggg_')) keys.push(k);
+    }
+    log += 'localStorage의 ggg_ 키 개수: ' + keys.length + '\n';
+
+    out.innerHTML = log;
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+
+function testGet() {
+  const out = document.getElementById('get-output');
+  let log = '';
+
+  const tests = [
+    'userName', 'appTitle', 'profileImg',
+    'ddata', 'wdata', 'habits', 'firstVisitDone',
+    'lifeplan', 'mvv', 'mandarat'
+  ];
+
+  tests.forEach(k => {
+    const v = get(k);
+    if (v === null) {
+      log += '<span class="ng">❌ get("' + k + '") = null</span>\n';
+    } else {
+      let info = '<span class="ok">✅ get("' + k + '")</span> = ';
+      if (typeof v === 'string') {
+        if (v.length > 50) info += 'string (길이 ' + v.length + ', "' + escapeHtml(v.substring(0, 40)) + '...")';
+        else info += JSON.stringify(v);
+      } else if (Array.isArray(v)) {
+        info += 'array (길이 ' + v.length + ')';
+      } else if (typeof v === 'object') {
+        info += 'object (키 ' + Object.keys(v).length + '개: ' + escapeHtml(Object.keys(v).slice(0, 4).join(', ')) + '...)';
+      } else {
+        info += String(v);
+      }
+      log += info + '\n';
+    }
+  });
+
+  // ddata 상세
+  log += '\n=== ddata 날짜별 todo 개수 ===\n';
+  const ddata = get('ddata');
+  if (ddata && typeof ddata === 'object') {
+    let total = 0;
+    Object.keys(ddata).sort().forEach(d => {
+      const n = (ddata[d].todos || []).length;
+      total += n;
+      log += '  ' + d + ': todos ' + n + '개\n';
+    });
+    log += '  총 todo: ' + total + '개\n';
+  } else {
+    log += '<span class="ng">ddata가 비어있거나 객체가 아님</span>\n';
+  }
+
+  // wdata 상세
+  log += '\n=== wdata 항목 ===\n';
+  const wdata = get('wdata');
+  if (wdata && typeof wdata === 'object') {
+    Object.keys(wdata).sort().forEach(k => {
+      const v = wdata[k];
+      const len = typeof v === 'string' ? v.length : (Array.isArray(v) ? v.length + ' items' : '?');
+      log += '  ' + k + ': ' + len + (typeof v === 'string' && v.length > 0 ? ' ("' + escapeHtml(v.substring(0, 30)) + '...")' : '') + '\n';
+    });
+  } else {
+    log += '<span class="ng">wdata가 비어있거나 객체가 아님</span>\n';
+  }
+
+  out.innerHTML = log;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// 자동 실행
+showCurrentLS();
+</script>
+
+</body>
+</html>
